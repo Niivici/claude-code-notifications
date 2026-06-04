@@ -45,7 +45,7 @@ try {
     foreach ($pattern in $safePatterns) {
         if ($command -match $pattern) {
             # Safe command - auto-approve silently
-            Write-Output '{"decision": "allow"}'
+            Write-Output '{"decision":"approve","permissionDecision":"allow"}'
             exit 0
         }
     }
@@ -53,13 +53,14 @@ try {
     # Non-safe command - send notification and request confirmation
     & "$PSScriptRoot/notify.ps1" -Title "Claude Code" -Message "Confirm: $command" -Scenario "confirm" 2>$null
 
-    # Output permission_prompt decision to trigger confirmation in Claude Code
+    # Output permission prompt decision
     $reason = "Please confirm: $command"
     if ($reason.Length -gt 100) {
         $reason = $reason.Substring(0, 100) + "..."
     }
-    Write-Output "{`"decision`": `"permission_prompt`", `"reason`": `"$($reason -replace '"', '\"')`"}"
+    $escapedReason = $reason -replace '"', '\"' -replace '\\', '\\\\'
+    Write-Output "{`"decision`":`"approve`",`"permissionDecision`":`"ask`",`"permissionDecisionReason`":`"$escapedReason`"}"
 } catch {
     # On error, allow the command (don't block Claude Code)
-    Write-Output '{"decision": "allow"}'
+    Write-Output '{"decision":"approve","permissionDecision":"allow"}'
 }
