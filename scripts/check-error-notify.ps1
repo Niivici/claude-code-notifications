@@ -1,13 +1,32 @@
 # Check if tool execution had an error
-# Claude Code sets TOOL_OUTPUT environment variable with the result
+# Claude Code passes data via stdin JSON
 
 param()
 
-# Read tool output from environment or stdin
-$toolOutput = $env:TOOL_OUTPUT
+$logFile = "$PSScriptRoot/notify.log"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-# Check for error indicators
-if ($toolOutput -match "error|Error|ERROR|failed|Failed|FAILED|exception|Exception") {
-    # Send error notification
-    & "$PSScriptRoot/notify.ps1" -Title "Claude Code" -Message "Error occurred" -Scenario "error"
+try {
+    # Read tool output from stdin (Claude Code's hook system)
+    $inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json
+    $toolOutput = $inputData.tool_output
+    $toolName = $inputData.tool_name
+
+    # Safely get output preview
+    $outputPreview = if ($toolOutput) {
+        $toolOutput.Substring(0, [Math]::Min(200, $toolOutput.Length))
+    } else {
+        "(null)"
+    }
+    Add-Content -Path $logFile -Value "$timestamp | PostToolUse | Tool=$toolName | Output=$outputPreview"
+
+    # Check for error indicators (more precise matching)
+    if ($toolOutput -match "^error:|failed:|exception:|FATAL|CRITICAL") {
+        Add-Content -Path $logFile -Value "$timestamp | ERROR DETECTED in $toolName"
+        # Send error notification
+        & "$PSScriptRoot/notify.ps1" -Title "Claude Code" -Message "Error in $toolName" -Scenario "error"
+    }
+} catch {
+    Add-Content -Path $logFile -Value "$timestamp | PostToolUse EXCEPTION: $_"
+    # Silently fail - don't break Claude Code execution
 }

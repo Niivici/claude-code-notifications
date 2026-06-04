@@ -5,6 +5,11 @@ param(
     [string]$Scenario = "default"
 )
 
+# Log hook invocation for debugging
+$logFile = "$PSScriptRoot/notify.log"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+Add-Content -Path $logFile -Value "$timestamp | Scenario=$Scenario | Title=$Title | Message=$Message | ToolName=$ToolName"
+
 # Build contextual message based on scenario
 $finalMessage = switch ($Scenario) {
     "tool_use" { "Executing: $ToolName" }
