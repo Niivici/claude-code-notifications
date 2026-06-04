@@ -1,10 +1,12 @@
-# PreToolUse hook: Auto-approve safe Bash commands, prompt for others
-# Outputs JSON decision to stdout to control Claude Code behavior
+# PreToolUse hook: Auto-approve safe commands silently.
+# Non-safe commands pass through to Claude Code's native permission system,
+# which decides whether to prompt the user. The transcript watcher
+# (claude-notify-watcher.ps1) detects when Claude Code actually waits
+# for confirmation and sends notifications — zero false positives.
 
 param()
 
 try {
-    # Read tool input from stdin
     $stdinData = [Console]::In.ReadToEnd()
     if (-not $stdinData) { exit 0 }
 
@@ -12,55 +14,35 @@ try {
     $toolName = $inputData.tool_name
     $command = $inputData.tool_input.command
 
-    # Only process Bash commands with actual command content
     if ($toolName -ne "Bash" -or -not $command) { exit 0 }
 
-    # Safe command patterns (read-only, no side effects)
+    # Safe command patterns - silently approved, no notification.
+    # These are read-only or low-risk commands that never need user confirmation.
     $safePatterns = @(
-        '^ls\b',
-        '^dir\b',
-        '^cat\b',
-        '^head\b',
-        '^tail\b',
-        '^grep\b',
-        '^find\b',
-        '^echo\b',
-        '^pwd$',
-        '^date$',
-        '^which\b',
-        '^where\b',
-        '^whoami$',
-        '^git\s+status',
-        '^git\s+diff',
-        '^git\s+log',
-        '^git\s+branch',
-        '^npm\s+list',
-        '^pip\s+list',
-        '^pip\s+show',
-        '^claude\s+--version',
-        '^claude\s+config'
+        '^ls\b', '^dir\b', '^cat\b', '^head\b', '^tail\b',
+        '^grep\b', '^find\b', '^echo\b', '^pwd$', '^date$',
+        '^which\b', '^where\b', '^whoami$',
+        '^git\s+status', '^git\s+diff', '^git\s+log', '^git\s+branch',
+        '^git\s+remote', '^git\s+show', '^git\s+stash\s+list',
+        '^npm\s+list', '^npm\s+ls', '^npm\s+info', '^npm\s+view',
+        '^pip\s+list', '^pip\s+show', '^pip\s+freeze',
+        '^node\s+--version', '^npm\s+--version', '^python\s+--version',
+        '^claude\s+--version', '^claude\s+config',
+        '^Get-Content', '^Get-ChildItem', '^Test-Path',
+        '^Select-String', '^Measure-Object'
     )
 
-    # Check if command matches safe patterns
     foreach ($pattern in $safePatterns) {
         if ($command -match $pattern) {
-            # Safe command - auto-approve silently
             Write-Output '{"decision":"approve","permissionDecision":"allow"}'
             exit 0
         }
     }
 
-    # Non-safe command - send notification and request confirmation
-    & "$PSScriptRoot/notify.ps1" -Title "Claude Code" -Message "Confirm: $command" -Scenario "confirm" 2>$null
+    # Non-safe command: let Claude Code's native permission system decide.
+    # Do NOT send notification here — the transcript watcher handles that,
+    # only when Claude Code actually requires user confirmation.
 
-    # Output permission prompt decision
-    $reason = "Please confirm: $command"
-    if ($reason.Length -gt 100) {
-        $reason = $reason.Substring(0, 100) + "..."
-    }
-    $escapedReason = $reason -replace '"', '\"' -replace '\\', '\\\\'
-    Write-Output "{`"decision`":`"approve`",`"permissionDecision`":`"ask`",`"permissionDecisionReason`":`"$escapedReason`"}"
 } catch {
-    # On error, allow the command (don't block Claude Code)
-    Write-Output '{"decision":"approve","permissionDecision":"allow"}'
+    # On error, let Claude Code handle it
 }
