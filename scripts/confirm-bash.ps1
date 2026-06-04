@@ -1,10 +1,20 @@
-# PreToolUse hook: Auto-approve safe commands silently.
-# Non-safe commands pass through to Claude Code's native permission system,
-# which decides whether to prompt the user. The transcript watcher
-# (claude-notify-watcher.ps1) detects when Claude Code actually waits
-# for confirmation and sends notifications — zero false positives.
+# PreToolUse hook: Auto-approve safe commands, notify + prompt for others.
+#
+# Architecture:
+#   permissions.allow (settings.local.json) = first filter
+#     Commands listed there never reach this hook.
+#
+#   This script = second filter (safe patterns)
+#     Commands matching safe patterns are silently approved.
+#     All other commands get notification + confirmation prompt.
+#
+# To reduce false positives: add commands to $safePatterns below.
+# To reduce notifications entirely: add commands to permissions.allow instead.
 
 param()
+
+$logFile = "$PSScriptRoot/confirm-bash.log"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 try {
     $stdinData = [Console]::In.ReadToEnd()
@@ -17,7 +27,8 @@ try {
     if ($toolName -ne "Bash" -or -not $command) { exit 0 }
 
     # Safe command patterns - silently approved, no notification.
-    # These are read-only or low-risk commands that never need user confirmation.
+    # These are read-only or low-risk commands.
+    # Add patterns here to reduce false positives.
     $safePatterns = @(
         '^ls\b', '^dir\b', '^cat\b', '^head\b', '^tail\b',
         '^grep\b', '^find\b', '^echo\b', '^pwd$', '^date$',
@@ -34,15 +45,23 @@ try {
 
     foreach ($pattern in $safePatterns) {
         if ($command -match $pattern) {
+            Add-Content -Path $logFile -Value "$timestamp | SAFE-APPROVE | $command"
             Write-Output '{"decision":"approve","permissionDecision":"allow"}'
             exit 0
         }
     }
 
-    # Non-safe command: let Claude Code's native permission system decide.
-    # Do NOT send notification here — the transcript watcher handles that,
-    # only when Claude Code actually requires user confirmation.
+    # Non-safe command - send notification and request confirmation
+    $preview = $command
+    if ($preview.Length -gt 100) { $preview = $preview.Substring(0, 100) + "..." }
 
+    Add-Content -Path $logFile -Value "$timestamp | NOTIFY+ASK | $command"
+
+    & "$PSScriptRoot/notify.ps1" -Title "Claude Code" -Message "Confirm: $preview" -Scenario "confirm" 2>$null
+
+    $escapedPreview = $preview -replace '"', '\"' -replace '\\', '\\\\'
+    Write-Output "{`"decision`":`"approve`",`"permissionDecision`":`"ask`",`"permissionDecisionReason`":`"Confirm: $escapedPreview`"}"
 } catch {
-    # On error, let Claude Code handle it
+    Add-Content -Path $logFile -Value "$timestamp | ERROR | $_"
+    Write-Output '{"decision":"approve","permissionDecision":"allow"}'
 }

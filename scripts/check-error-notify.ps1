@@ -1,5 +1,5 @@
-# Check if tool execution had an error
-# Claude Code passes data via stdin JSON
+# PostToolUse hook: Check if tool execution had a real error.
+# Only notifies on clear failure signals, not benign "error" text in output.
 
 param()
 
@@ -7,10 +7,12 @@ $logFile = "$PSScriptRoot/notify.log"
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 try {
-    # Read tool output from stdin (Claude Code's hook system)
     $inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $toolOutput = $inputData.tool_output
     $toolName = $inputData.tool_name
+
+    # Only check Bash commands
+    if ($toolName -ne "Bash") { exit 0 }
 
     # Safely get output preview
     $outputPreview = if ($toolOutput) {
@@ -20,11 +22,29 @@ try {
     }
     Add-Content -Path $logFile -Value "$timestamp | PostToolUse | Tool=$toolName | Output=$outputPreview"
 
-    # Check for error indicators (more precise matching)
-    if ($toolOutput -match "^error:|failed:|exception:|FATAL|CRITICAL") {
-        Add-Content -Path $logFile -Value "$timestamp | ERROR DETECTED in $toolName"
-        # Send error notification
-        & "$PSScriptRoot/notify.ps1" -Title "Claude Code" -Message "Error in $toolName" -Scenario "error"
+    # Check for REAL error indicators only.
+    # Avoid matching benign text like grep results or compiler info messages.
+    $errorPatterns = @(
+        'command not found',
+        'Permission denied',
+        'No such file or directory',
+        'cannot access',
+        'is not recognized as',
+        'fatal:',
+        'FATAL:',
+        'CRITICAL:'
+    )
+
+    if ($toolOutput) {
+        foreach ($pattern in $errorPatterns) {
+            if ($toolOutput -match $pattern) {
+                Add-Content -Path $logFile -Value "$timestamp | ERROR DETECTED in $toolName: $pattern"
+                $preview = $toolOutput
+                if ($preview.Length -gt 100) { $preview = $preview.Substring(0, 100) + "..." }
+                & "$PSScriptRoot/notify.ps1" -Title "Claude Code" -Message "Error: $preview" -Scenario "error" 2>$null
+                break
+            }
+        }
     }
 } catch {
     Add-Content -Path $logFile -Value "$timestamp | PostToolUse EXCEPTION: $_"
