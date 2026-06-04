@@ -1,0 +1,6 @@
+# Ignore test results
+*.log
+toast-result.txt
+
+# Ignore PowerShell temp files
+*.ps1xml
