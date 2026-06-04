@@ -1,128 +1,122 @@
 # Claude Code Windows Notifications
 
-Windows notification integration for Claude Code CLI. Get desktop notifications in Windows Action Center when tasks complete, notable commands execute, or errors occur.
+Windows 桌面通知集成，用于 Claude Code CLI。当任务完成、需要确认或出错时，在 Windows 通知中心推送消息。
 
-## Features
+## 功能
 
-- **Task Completion**: Notification when Claude Code session ends
-- **Notable Commands**: Notification when potentially dangerous Bash commands are executed
-- **Error Alerts**: Notification when tool execution fails
+- **任务完成通知** — Claude Code 会话结束时推送
+- **命令确认通知** — 需要用户确认的 Bash 命令执行前推送
+- **错误通知** — 工具执行失败时推送
 
-## Prerequisites
+## 前置条件
 
 - Windows 10/11
 - PowerShell 5.1+
-- Notifications enabled in Windows Settings
+- Windows 通知已开启（设置 → 系统 → 通知）
 
-## Installation
+## 安装
 
-1. Clone this repository:
+### 1. 克隆仓库
+
 ```bash
 git clone https://github.com/Niivici/claude-code-notifications.git
 ```
 
-2. Copy scripts to Claude Code directory:
+### 2. 复制脚本到 Claude Code 目录
+
 ```powershell
 Copy-Item scripts/* ~/.claude/scripts/
 ```
 
-3. Add hooks to `~/.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell.exe -ExecutionPolicy Bypass -File \"C:/Users/YOUR_USERNAME/.claude/scripts/notify.ps1\" -Title \"Claude Code\" -Message \"Task completed\" -Scenario \"complete\""
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell.exe -ExecutionPolicy Bypass -File \"C:/Users/YOUR_USERNAME/.claude/scripts/check-confirm-notify.ps1\""
-          },
-          {
-            "type": "command",
-            "command": "powershell.exe -ExecutionPolicy Bypass -File \"C:/Users/YOUR_USERNAME/.claude/scripts/check-error-notify.ps1\""
-          }
-        ]
-      }
-    ]
-  }
-}
+### 3. 配置 hooks（settings.json）
+
+复制 `settings.example.json` 的内容到 `~/.claude/settings.json`，将 `YOUR_USERNAME` 替换为你的用户名。
+
+### 4. 配置权限（settings.local.json）
+
+复制 `settings.local.example.json` 的内容到 `~/.claude/settings.local.json`。
+
+**关键**：`permissions.allow` 中只保留只读/安全命令，其余 Bash 命令由 PreToolUse hook 接管。
+
+## 工作机制
+
+```
+Claude Code 执行 Bash 命令
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│  PreToolUse Hook (confirm-bash.ps1)     │
+│                                         │
+│  收到命令 → 匹配安全模式？              │
+│  ├─ YES → {"decision":"allow"} 静默放行  │
+│  └─ NO  → 发送 Windows 通知             │
+│           + {"decision":"permission_prompt"}
+│           → 终端弹出 Yes/No 等待确认     │
+└─────────────────────────────────────────┘
+        │ (命令执行后)
+        ▼
+┌─────────────────────────────────────────┐
+│  PostToolUse Hook (check-error-notify)  │
+│  检测 error/failed/exception → 通知     │
+└─────────────────────────────────────────┘
+        │ (会话结束)
+        ▼
+┌─────────────────────────────────────────┐
+│  Stop Hook (notify.ps1)                 │
+│  发送 "Task completed" 通知             │
+└─────────────────────────────────────────┘
 ```
 
-## Windows Settings
+## 安全命令白名单
 
-Ensure notifications are enabled:
-1. Open **Settings** > **System** > **Notifications**
-2. Turn on **Notifications**
-3. Turn on **Notification Center**
+以下命令自动放行，不弹通知（可在 `confirm-bash.ps1` 中自定义）：
 
-## Usage
+- `ls`, `cat`, `grep`, `find`, `head`, `tail`, `echo`, `pwd`
+- `git status`, `git diff`, `git log`, `git branch`
+- `npm list`, `pip list`, `which`, `where`
 
-Notifications are sent automatically:
-- When Claude Code session ends (Stop hook)
-- When notable/dangerous Bash commands are executed (PostToolUse hook)
-- When a tool execution fails with an error (PostToolUse hook)
+其他所有 Bash 命令（如 `git push`, `rm`, `npm install`, `curl` 等）会触发通知并要求确认。
 
-View notifications: Press `Win+A` to open Action Center.
+## 自定义
 
-## How It Works
+### 添加安全命令
 
-### Notification Flow
+编辑 `~/.claude/scripts/confirm-bash.ps1`，在 `$safePatterns` 数组中添加：
 
-1. **Stop Hook**: Fires when Claude Code session ends. Sends a "Task completed" notification.
+```powershell
+$safePatterns = @(
+    # ... 已有模式 ...
+    '^your_safe_command\b'
+)
+```
 
-2. **PostToolUse Hook**: Fires after every tool execution. The `check-confirm-notify.ps1` script:
-   - Reads the tool data from stdin (JSON)
-   - Checks if the tool is a Bash command
-   - Matches against a list of "dangerous" command patterns
-   - Sends a notification if the command matches
+### 修改通知样式
 
-3. **Error Detection**: The `check-error-notify.ps1` script:
-   - Reads tool output from stdin
-   - Checks for error indicators (error, failed, exception, FATAL, CRITICAL)
-   - Sends an error notification if detected
+编辑 `~/.claude/scripts/notify.ps1`，调整 `$finalMessage` 的 switch 逻辑。
 
-### Dangerous Command Patterns
+## 文件说明
 
-The following patterns trigger notifications:
-- `rm -rf`, `rm -r`, `rmdir`, `del /`
-- `git push`, `git reset --hard`, `git clean -f`
-- `npm publish`, `pip install`, `cargo install`
-- `sudo`, `chmod 777`, `chown`
-- `curl | sh`, `wget | sh`
-- `Remove-Item`, `Format-`, `Invoke-Expression`
+| 文件 | 用途 |
+|------|------|
+| `scripts/notify.ps1` | 主通知脚本（发送 Windows Toast 通知） |
+| `scripts/confirm-bash.ps1` | PreToolUse hook：决定放行或确认 + 通知 |
+| `scripts/check-error-notify.ps1` | PostToolUse hook：检测错误并通知 |
+| `scripts/NotificationModule.psm1` | PowerShell 模块 |
+| `scripts/notify.tests.ps1` | Pester 测试 |
+| `settings.example.json` | settings.json 配置示例 |
+| `settings.local.example.json` | settings.local.json 权限配置示例 |
 
-## Known Limitations
+## 测试
 
-- **PreToolUse hooks do not fire for Bash commands** in Claude Code's Auto mode (acceptEdits). This is a Claude Code limitation. Notifications are sent after command execution, not before.
-- **Notification hook's `permission_prompt` matcher** does not trigger on Windows. This is a known issue with Claude Code 2.1.140.
-- Notifications are sent for commands matching "dangerous" patterns, but this is an approximation. Some safe commands may match, and some dangerous commands may not match.
-
-## Testing
-
-Run tests with Pester:
 ```powershell
 Invoke-Pester scripts/notify.tests.ps1
 ```
 
-## Files
+## 注意事项
 
-- `scripts/notify.ps1` - Main notification script (sends Windows toast notifications)
-- `scripts/NotificationModule.psm1` - PowerShell module with Send-Notification function
-- `scripts/notify.tests.ps1` - Pester tests
-- `scripts/check-confirm-notify.ps1` - Notable command detection script
-- `scripts/check-error-notify.ps1` - Error detection script
+- **需要重启 Claude Code 会话**才能让 hook 配置和权限规则生效
+- PreToolUse hook 仅对不在 `permissions.allow` 中的 Bash 命令触发
+- 如果 hook 脚本出错，会自动放行命令（不阻塞 Claude Code）
 
 ## License
 

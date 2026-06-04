@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"C:/Users/YOUR_USERNAME/.claude/scripts/notify.ps1\" -Title \"Claude Code\" -Message \"Task completed\" -Scenario \"complete\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"C:/Users/YOUR_USERNAME/.claude/scripts/confirm-bash.ps1\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"C:/Users/YOUR_USERNAME/.claude/scripts/check-error-notify.ps1\""
+          }
+        ]
+      }
+    ]
+  }
+}
